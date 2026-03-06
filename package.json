@@ -1,0 +1,27 @@
+{
+    "name": "ultimate-formatter",
+    "displayName": "Ultimate Formatter",
+    "publisher": "MrGhettone",
+    "description": "Formatter personalizzato per JS e PHP",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.70.0"
+    },
+    "main": "ultimate-formatter.js",
+    "activationEvents": [
+        "onLanguage:javascript",
+        "onLanguage:php"
+    ],
+    "contributes": {
+        "languages": [
+            { "id": "javascript", "aliases": ["JavaScript"], "extensions": [".js"] },
+            { "id": "php", "aliases": ["PHP"], "extensions": [".php"] }
+        ],
+        "grammars": [],
+        "configurationDefaults": {
+            "[javascript]": { "editor.defaultFormatter": "ultimate-formatter" },
+            "[php]": { "editor.defaultFormatter": "ultimate-formatter" }
+        },
+        "commands": []
+    }
+}
