@@ -1,6 +1,7 @@
 {
     "name": "ultimate-formatter",
     "displayName": "Ultimate Formatter",
+    "license": "MIT",
     "publisher": "MrGhettone",
     "description": "Formatter personalizzato per JS e PHP",
     "version": "0.0.1",
