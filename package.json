@@ -3,11 +3,13 @@
     "displayName": "Ultimate Formatter",
     "license": "MIT",
     "publisher": "MrGhettone",
-    "description": "Formatter personalizzato per JS e PHP",
-    "version": "0.0.1",
+    "description": "Custom Formatter for JS and PHP",
+    "version": "0.0.5",
+    "icon": "icon.png",
     "engines": {
         "vscode": "^1.70.0"
     },
+    "categories": ["Formatters"],
     "main": "ultimate-formatter.js",
     "activationEvents": [
         "onLanguage:javascript",

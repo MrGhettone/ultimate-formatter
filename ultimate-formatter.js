@@ -31,65 +31,97 @@ module.exports = { activate, deactivate };
 // ---------------------------------------------------------
 //  FORMATTER
 // ---------------------------------------------------------
+let indentLevel = 0;
+
 function formatCode(code,lang)
 {
     const indentUnit = "    "; // 4 spazi
-
+    // console.log(code)
     // 1) Normalizza newline
     code = code.replace(/\r\n/g, "\n");
+    code = code.replace(/,\s+/g, ",");
+    code = code.replace(/\)\s*{/g, ")\n{");
 
     // 2) Rimuovi spazi nei parametri delle tonde (semplice, NON entra in stringhe/commenti)
-    code = code.replace(/\s*\(+/g, "(");
-    code = code.replace(/\(\s+/g, "(");
-    code = code.replace(/\s+\)/g, ")");
-    code = code.replace(/,\s+/g, ",");
+    // code = code.replace(/\s*\(+/g, "(");
+    // code = code.replace(/\(\s+/g, "(");
+    // code = code.replace(/\s+\)/g, ")");
 
     // 3) Metti le graffe su linee separate:
     //    - metti newline prima/dopo '{' e '}' quando sono attaccate ad altro codice
     //    - usiamo pattern globali
-    code = code.replace(/\s*\{\s*/g, "\n{\n");
-    code = code.replace(/\s*\}\s*/g, "\n}\n");
+    // code = code.replace(/\s*\{\s*/g, "\n{\n");
+    // code = code.replace(/\s*\}\s*/g, "\n}\n");
+
+    // code = code.replace(/\/(.*)\s*\}\s*(.*)\/g/g, "/$1}$2/g");
+    // code = code.replace(/\/(.*)\s*\{\s*(.*)\/g/g, "/$1{$2/g");
+    // code = code.replace(/"(.*)\s*\}\s*(.*)"/g, "\"$1}$2\"");
+    // code = code.replace(/"(.*)\s*\{\s*(.*)"/g, "\"$1{$2\"");
 
     // 4) Riduci sequenze di newline multiple a massimo 2
-    code = code.replace(/\n{3,}/g, "\n\n");
+    // code = code.replace(/\n{3,}/g, "\n");
     // code = code.replace(/;/g, ';\n');
 
     // 5) Split in righe e sostituisci tab con 4 spazi
     const rawLines = code.split("\n");
     const lines = rawLines.map(l => l.replace(/\t/g, indentUnit));
 
-    let indentLevel = 0;
     let output = [];
     let ivuoti = 0;
 
     for (let i = 0; i < lines.length; i++)
     {
-        const raw = lines[i];
-        var trimmed = raw.trim();
+        const line = lines[i];
+        var trimmed = line.trim();
 
-        // conserva linee vuote
-        if (trimmed === "" && ivuoti == 0)
+        if(/\/\//.test(line))
         {
-            if (lines[i + 1] !== "}" && lines[i - 1] !== "{")
-            {
-                // output.push("");
-                ivuoti = 0;
-            }
+            if(!/\/\/\s/.test(line))
+                trimmed = trimmed.replace(/\/\//g, "// ");
+            output.push(indentUnit.repeat(indentLevel)+trimmed);
             continue;
         }
 
-
-        // caso chiusura graffa: decrementa indent prima di emettere
-        if (trimmed === "}") {
-            indentLevel = Math.max(0, indentLevel - 1);
-            output.push(indentUnit.repeat(indentLevel) + "}");
+        // conserva linee vuote
+        if(trimmed === "")
+        {
+            ivuoti++;
             continue;
+        }
+        else if(ivuoti > 0)
+        {
+            output.push("");
+            ivuoti = 0;
         }
 
         // caso apertura graffa singola: emetti alla indent corrente, poi incrementa
-        if (trimmed === "{") {
-            output.push(indentUnit.repeat(indentLevel) + "{");
+        if (trimmed == "{" || trimmed.endsWith("{")){
+            output.push(indentUnit.repeat(indentLevel)+trimmed);
             indentLevel++;
+            continue;
+        }
+
+        if(trimmed != "{" && trimmed.startsWith("{"))
+        {
+            // indentLevel++;
+            indentLevel++;
+            trimmed = trimmed.replace(/{(.*)/g, "{\n"+indentUnit.repeat(indentLevel)+"$1");
+            // indentLevel++;
+        }
+
+        if(trimmed != "}" && trimmed.endsWith("}"))
+        {
+            // indentLevel = Math.max(0, indentLevel - 1);
+            indentLevel = Math.max(0, indentLevel - 1);
+            trimmed = trimmed.replace(/(.*)}/g, "$1\n"+indentUnit.repeat(indentLevel)+"}");
+        }
+
+        // caso chiusura graffa: decrementa indent prima di emettere
+        if (trimmed == "}" || trimmed.startsWith("}")){
+        // if (trimmed == "}"){
+            indentLevel = Math.max(0, indentLevel - 1);
+            output.push(indentUnit.repeat(indentLevel)+trimmed);
+            // indentLevel--;
             continue;
         }
 
@@ -104,67 +136,64 @@ function formatCode(code,lang)
         case "javascript":
         {
             output = formatJs(output);
+            break;
         }
         case "php":
         {
             output = formatPhp(output);
+            break;
         }
     }
 
-    output = output.join("\n").replace(/<\?php(.*);\s*\?>/g, "<?php$1; ?>").split("\n");
-
-    // join e assicurati newline finale come nell'originale (non obbligatorio)
     return output.join("\n");
 }
 
-// Funzione per separare i ; solo fuori da stringhe
+// Funzione per separare i  solo fuori da stringhe
 function splitSemicolonsOutsideStrings(line,indentLevel)
 {
     let result = '';
     let inSingleQuote = false;
     let inDoubleQuote = false;
-    let inObject = false;
     const indentUnit = "    "; // 4 spazi
 
     for (let i = 0; i < line.length; i++)
     {
         const char = line[i];
         if(char === "'" && !inDoubleQuote)
-        {
             inSingleQuote = !inSingleQuote;
-        }
         else if(char === '"' && !inSingleQuote)
-        {
             inDoubleQuote = !inDoubleQuote;
-        }
 
+        // if(char === '.' && !inSingleQuote && !inDoubleQuote)
+        //     result += '..'; // segnaposto doppio per split successivo
         if(char === '+' && !inSingleQuote && !inDoubleQuote)
-        {
             result += '++'; // segnaposto doppio per split successivo
-        }
         else if(char === '=' && !inSingleQuote && !inDoubleQuote)
-        {
             result += '=='; // segnaposto doppio per split successivo
-        }
         else if(char === ';' && !inSingleQuote && !inDoubleQuote)
-        {
             result += ';;'; // segnaposto doppio per split successivo
-        }
         else
-        {
             result += char;
-        }
     }
 
     // sostituisci doppio ; con ; + newline
+    // result = result.replace(/ \.\.==/g, '.=');
     result = result.replace(/ \+\+==/g, '+=');
     result = result.replace(/ \+\+ /g, '+');
+    // result = result.replace(/ \.\. /g, '.');
+    result = result.replace(/\+\+ /g, '+');
+    // result = result.replace(/\.\. /g, '.');
+    result = result.replace(/ \+\+/g, '+');
+    // result = result.replace(/ \.\./g, '.');
     result = result.replace(/\+\+/g, '+');
+    if(/(.*)\.\.(.*)/g.test(result))
+    {
+        console.log(result);
+        result = result.replace(/(.*)\.\.(.*)/g, '$1.$2');
+        console.log(result);
+    }
     result = result.replace(/==/g, '=');
-    result = result.replace(/;{2,} (.*)/g, ';\n'+indentUnit.repeat(indentLevel)+'$1');
-    // result = result.replace(/(;{2,})(?!\n)\s*/g, ';\n' + indentUnit.repeat(indentLevel));
-    result = result.replace(/;{2,}/g, ';');
-
+    result = result.replace(/;;\s*/g, ';\n'+indentUnit.repeat(indentLevel));
     return result;
 }
 
@@ -173,22 +202,28 @@ function formatJs(lines)
     let inSingleQuote = false;
     let inAjax = false;
     let inGraf = false;
+    let inReg = false;
     let inDoubleQuote = false;
-    let indentLevel = 0;
+
     const indentUnit = "    "; // 4 spazi
     var temp = [];
 
     lines = lines.join("\n")
 
-    lines = lines.replace(/}\s*\)\s*\.(done|fail)/g, "}).$1")
+    // lines = lines.replace(/}\s*\)\s*\.(.*)/g, "}).$1")
 
-    lines = lines.replace(/\.ajax\(\s*{/g, ".ajax({");
+    // lines = lines.replace(/\$\.ajax\(\s*{/g, "\$.ajax({");
 
-    lines = lines.replace(/:\s*{/g, ":{");
+    // lines = lines.replace(/:\s*{/g, ":{");
 
-    lines = lines.replace(/}\s*\)/g, "})");
+    // lines = lines.replace(/}\s*\)/g, "})");
 
-    lines = lines.replace(/\)\s*\.(done|fail)\((.*?)\)\s*{/g, ").$1($2) {");
+    lines = lines.replace(/\)\s*\.(.*)\((.*?)\)\s*{/g, ").$1($2) {");
+    lines = lines.replace(/function\((.*?)\)\s*{/g, "function($1) {");
+
+    // lines = lines.replace(/\/\s*(.*)\s*(.*)\s*(.*)\//g, "/$1$2$3{/");
+
+    // lines = lines.replace(/"\s*(.*)\s*"\);/g, "\"$1\");");
 
     lines = lines.split("\n");
 
@@ -197,22 +232,32 @@ function formatJs(lines)
         const line = lines[j];
         var result = '';
 
-        if(line.trim() === "$.ajax({")
+        if(line.trim() == "$.ajax({" && !inAjax)
         {
             inAjax = true;
             result = line;
             indentLevel = Math.floor(line.indexOf("$.ajax({") / indentUnit.length) + 1;
         }
-        else if(inAjax && line.trim() === "}).done(function(data) {")
+        else if(inAjax && (/\}\)\..*\(function\(.*\) \{/.test(line.trim())))
         {
             inAjax = false;
-            result = line;
+            indentLevel = Math.max(0, indentLevel - 1);
+            indentLevel = Math.max(0, indentLevel - 1);
+            result = indentUnit.repeat(indentLevel)+line;
+            indentLevel = Math.max(0, indentLevel - 1);
         }
         else if (inAjax)
         {
+            // if(lines[j - 1].trim().endsWith("{"))
+            //     result+= indentUnit.repeat(indentLevel - 1);
+            // console.log('line: '+line.length)
             for (let i = 0; i < line.length; i++)
             {
+                // var inComment = line.trim().startsWith("//");
                 const char = line[i];
+                // if(char == ',')
+                //     console.log(char, inSingleQuote, inDoubleQuote, inGraf, inReg);
+
                 if(char === "'" && !inDoubleQuote)
                 {
                     inSingleQuote = !inSingleQuote;
@@ -224,19 +269,21 @@ function formatJs(lines)
 
                 if(char === '{' && !inSingleQuote && !inDoubleQuote)
                 {
-                    result += '{'; // segnaposto doppio per split successivo
-                    inGraf = true;
+                    result += '{';
+                    // inGraf = true;
                     indentLevel++;
                 }
                 else if(char === '}' && !inSingleQuote && !inDoubleQuote)
                 {
-                    result += '}'; // segnaposto doppio per split successivo
-                    inGraf = false;
-                    indentLevel--;
+                    indentLevel = Math.max(0, indentLevel - 1);
+                    // indentLevel--;
+                    // result += indentUnit.repeat(indentLevel)+'}';
+                    result += '}';
+                    // inGraf = false;
                 }
                 else if(char === ',' && !inSingleQuote && !inDoubleQuote)
                 {
-                    result += ',\n'+indentUnit.repeat(indentLevel); // segnaposto doppio per split successivo
+                    result += ',\n'+indentUnit.repeat(indentLevel);
                 }
                 else
                 {
@@ -247,14 +294,19 @@ function formatJs(lines)
         else
         {
             result = line;
+            indentLevel = 0;
         }
-
-
         temp.push(result);
-    }
 
-    lines = lines.join("\n")
-    lines = lines.split("\n")
+        // temp = temp.join("\n")
+
+        // temp = temp.replace(/,,/g, ",");
+
+        // temp = temp.replace(/"\s*(.*)\s*"\);/g, "\"$1\");");
+
+        // temp = temp.split("\n");
+
+    }
 
     return temp;
 }
