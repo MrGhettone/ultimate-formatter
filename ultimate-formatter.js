@@ -129,7 +129,10 @@ function formatCode(code,lang)
         trimmed = splitSemicolonsOutsideStrings(trimmed,indentLevel);
 
         // riga normale: emetti alla indent corrente
-        output.push(indentUnit.repeat(indentLevel) + trimmed);
+        if(lines[i - 1].endsWith(")") && trimmed != '{' && !trimmed.startsWith("{") && !trimmed.endsWith("{"))
+            output.push(indentUnit.repeat(indentLevel + 1) + trimmed);
+        else
+            output.push(indentUnit.repeat(indentLevel) + trimmed);
     }
 
     switch(lang)
