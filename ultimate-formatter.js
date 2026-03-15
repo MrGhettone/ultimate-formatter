@@ -32,38 +32,18 @@ module.exports = { activate, deactivate };
 //  FORMATTER
 // ---------------------------------------------------------
 let indentLevel = 0;
-
+// Funzione principale di formattazione, che normalizza il codice e poi chiama funzioni specifiche per ogni linguaggio
 function formatCode(code,lang)
 {
     const indentUnit = "    "; // 4 spazi
-    // console.log(code)
-    // 1) Normalizza newline
     code = code.replace(/\r\n/g, "\n");
     code = code.replace(/\(\s*(.*)\s*,\s*(.*)\s*\)/g, "($1,$2)");
-    // if(!/".*\)\s*{.*"/.test(code) && !/'.*\)\s*{.*'/.test(code))
     code = code.replace(/\)\s*{/g, ")\n{");
     code = code.replace(/{\s*"/g, "{\"");
 
 
     // 2) Rimuovi spazi nei parametri delle tonde (semplice, NON entra in stringhe/commenti)
-    // code = code.replace(/\s*\(+/g, "(");
-    // code = code.replace(/\(\s+/g, "(");
-    // code = code.replace(/\s+\)/g, ")");
-
-    // 3) Metti le graffe su linee separate:
-    //    - metti newline prima/dopo '{' e '}' quando sono attaccate ad altro codice
-    //    - usiamo pattern globali
-    // code = code.replace(/\s*\{\s*/g, "\n{\n");
-    // code = code.replace(/\s*\}\s*/g, "\n}\n");
-
-    // code = code.replace(/\/(.*)\s*\}\s*(.*)\/g/g, "/$1}$2/g");
-    // code = code.replace(/\/(.*)\s*\{\s*(.*)\/g/g, "/$1{$2/g");
-    // code = code.replace(/"(.*)\s*\}\s*(.*)"/g, "\"$1}$2\"");
-    // code = code.replace(/"(.*)\s*\{\s*(.*)"/g, "\"$1{$2\"");
-
-    // 4) Riduci sequenze di newline multiple a massimo 2
-    // code = code.replace(/\n{3,}/g, "\n");
-    // code = code.replace(/;/g, ';\n');
+    code = code.replace(/\s*\(+/g, "(");
 
     // 5) Split in righe e sostituisci tab con 4 spazi
     const rawLines = code.split("\n");
@@ -76,14 +56,16 @@ function formatCode(code,lang)
     {
         const line = lines[i];
         var trimmed = line.trim();
-
-        if(/\/\//.test(line))
+        // identifico i commenti e li emetto senza modificarli, in questo modo evito di inserire spazi o newline indesiderati all'interno di commenti che possono essere presenti in linee con codice
+        // if(/\/\//.test(trimmed))
+        if(trimmed.startsWith("//"))
         {
-            if(!/\/\/\s/.test(line))
-                trimmed = trimmed.replace(/\/\//g, "// ");
             output.push(indentUnit.repeat(indentLevel)+trimmed);
             continue;
         }
+
+        if(!/\/\/\s/.test(trimmed))
+            trimmed = trimmed.replace(/\/\//g, "// ");
 
         // conserva linee vuote
         if(trimmed === "")
@@ -98,9 +80,43 @@ function formatCode(code,lang)
         }
 
         // caso apertura graffa singola: emetti alla indent corrente, poi incrementa
-        if (trimmed == "{" || trimmed.endsWith("{")){
-            output.push(indentUnit.repeat(indentLevel)+trimmed);
-            indentLevel++;
+        if (trimmed == "{" || trimmed.endsWith("{"))
+        {
+            if(/\}\}/.test(trimmed))
+            {
+                var splitted = trimmed.split("{");
+                for(let j = 0; j < splitted.length; j++)
+                {
+                    indentLevel = Math.max(0, indentLevel - 1);
+                    output.push(indentUnit.repeat(indentLevel)+splitted[j]+(j < splitted.length - 1 ? "{" : ""));
+                }
+            }
+            else
+            {
+                output.push(indentUnit.repeat(indentLevel)+trimmed);
+                indentLevel++;
+            }
+            continue;
+        }
+
+        // caso chiusura graffa: decrementa indent prima di emettere
+        if (trimmed == "}" || trimmed.startsWith("}"))
+        // if (trimmed == "}"){
+        {
+            if(/\}\}/.test(trimmed))
+            {
+                var splitted = trimmed.split("}");
+                for(let j = 0; j < splitted.length; j++)
+                {
+                    indentLevel = Math.max(0, indentLevel - 1);
+                    output.push(indentUnit.repeat(indentLevel)+splitted[j]+(j < splitted.length - 1 ? "}" : ""));
+                }
+            }
+            else
+            {
+                indentLevel = Math.max(0, indentLevel - 1);
+                output.push(indentUnit.repeat(indentLevel)+trimmed);
+            }
             continue;
         }
 
@@ -110,20 +126,10 @@ function formatCode(code,lang)
             trimmed = trimmed.replace(/{(.*)/g, "{\n"+indentUnit.repeat(indentLevel)+"$1");
         }
 
-        if(trimmed != "}" && trimmed.endsWith("}"))
+        if(trimmed != "}" && trimmed.endsWith("}") && (!/\}.*"/.test(trimmed || !/\}.*'/.test(trimmed))))
         {
-            // indentLevel = Math.max(0, indentLevel - 1);
             indentLevel = Math.max(0, indentLevel - 1);
             trimmed = trimmed.replace(/(.*)}/g, "$1\n"+indentUnit.repeat(indentLevel)+"}");
-        }
-
-        // caso chiusura graffa: decrementa indent prima di emettere
-        if (trimmed == "}" || trimmed.startsWith("}")){
-        // if (trimmed == "}"){
-            indentLevel = Math.max(0, indentLevel - 1);
-            output.push(indentUnit.repeat(indentLevel)+trimmed);
-            // indentLevel--;
-            continue;
         }
 
         trimmed = splitSemicolonsOutsideStrings(trimmed,indentLevel);
@@ -168,8 +174,6 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
         else if(char === '"' && !inSingleQuote)
             inDoubleQuote = !inDoubleQuote;
 
-        // if(char === '.' && !inSingleQuote && !inDoubleQuote)
-        //     result += '..'; // segnaposto doppio per split successivo
         if(char === '+' && !inSingleQuote && !inDoubleQuote)
             result += '++'; // segnaposto doppio per split successivo
         else if(char === '=' && !inSingleQuote && !inDoubleQuote)
@@ -181,60 +185,31 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
     }
 
     // sostituisci doppio ; con ; + newline
-    // result = result.replace(/ \.\.==/g, '.=');
     result = result.replace(/ \+\+==/g, '+=');
     result = result.replace(/ \+\+ /g, '+');
-    // result = result.replace(/ \.\. /g, '.');
     result = result.replace(/\+\+ /g, '+');
-    // result = result.replace(/\.\. /g, '.');
     result = result.replace(/ \+\+/g, '+');
-    // result = result.replace(/ \.\./g, '.');
     result = result.replace(/\+\+/g, '+');
-    // if(/(.*)\.\.(.*)/g.test(result))
-    // {
-    //     console.log(result);
-    //     result = result.replace(/(.*)\.\.(.*)/g, '$1.$2');
-    //     console.log(result);
-    // }
     result = result.replace(/==/g, '=');
     result = result.replace(/;;\s*/g, ';\n'+indentUnit.repeat(indentLevel));
+
     return result;
 }
 
+// Regola per mettere newline dopo chiamate a funzioni (es. .then() { ) e dopo dichiarazioni di funzioni (es. function() { )
 function formatJs(lines)
 {
-    let inSingleQuote = false;
-    let inAjax = false;
-    let inGraf = false;
-    let inReg = false;
-    let inDoubleQuote = false;
-
+    let inSingleQuote = false,
+        inAjax = false,
+        inDoubleQuote = false,
+        temp = [];
     const indentUnit = "    "; // 4 spazi
-    var temp = [];
 
-    // lines = lines.join("\n")
-
-    // lines = lines.replace(/}\s*\)\s*\.(.*)/g, "}).$1")
-
-    // lines = lines.replace(/\$\.ajax\(\s*{/g, "\$.ajax({");
-
-    // lines = lines.replace(/:\s*{/g, ":{");
-
-    // lines = lines.replace(/}\s*\)/g, "})");
-    // if(!/\)\.\$1\(\$2\) \{\"/.test(lines))
+    // indenta le ajax correttamente con lo then o done dopo la tonda e allinea il function alla indentazione corretta
     lines = lines.join("\n").replace(/\)\s*\.(.*)\((.*?)\)\s*{/g, ").$1($2) {").split("\n");
     lines = lines.join("\n").replace(/function\((.*?)\)\s*{/g, "function($1) {").split("\n");
-    // if(!/function($1) {"/.test(lines))
-        // lines = lines.replace(/function\((.*?)\)\s*{/g, "function($1) {");
-    // lines = lines.replace(/{\s*"/g, "{\"");
 
-    // lines = lines.replace(/\/\s*(.*)\s*(.*)\s*(.*)\//g, "/$1$2$3{/");
-
-    // lines = lines.replace(/"\s*(.*)\s*"\);/g, "\"$1\");");
-    // lines = lines.replace(/{\s*"/g, "{\"");
-
-    // lines = lines.split("\n");
-
+    // coclo per identificare l'intestazione di una chiamata ajax e indentare tutto il blocco fino alla chiusura del function associato, tenendo conto di eventuali stringhe che possono contenere graffe o parentesi
     for (let j = 0; j < lines.length; j++)
     {
         const line = lines[j];
@@ -256,46 +231,32 @@ function formatJs(lines)
         }
         else if (inAjax)
         {
-            // if(lines[j - 1].trim().endsWith("{"))
-            //     result+= indentUnit.repeat(indentLevel - 1);
             for (let i = 0; i < line.length; i++)
             {
-                // var inComment = line.trim().startsWith("//");
                 const char = line[i];
-                // if(char == ',')
-                //     console.log(char, inSingleQuote, inDoubleQuote, inGraf, inReg);
-
+                // identifico se sono dentro una stringa per evitare di contare graffe o parentesi che possono essere presenti in stringhe
                 if(char === "'" && !inDoubleQuote)
-                {
                     inSingleQuote = !inSingleQuote;
-                }
                 else if(char === '"' && !inSingleQuote)
-                {
                     inDoubleQuote = !inDoubleQuote;
-                }
-
+                // se non sono dentro una stringa, conto le graffe per identificare la fine del blocco ajax/ oggetto data e indentare correttamente
                 if(char === '{' && !inSingleQuote && !inDoubleQuote)
                 {
                     result += '{';
-                    // inGraf = true;
                     indentLevel++;
                 }
                 else if(char === '}' && !inSingleQuote && !inDoubleQuote)
                 {
                     indentLevel = Math.max(0, indentLevel - 1);
-                    // indentLevel--;
-                    // result += indentUnit.repeat(indentLevel)+'}';
                     result += '}';
-                    // inGraf = false;
                 }
-                else if(char === ',' && !inSingleQuote && !inDoubleQuote)
+                // se sono presenti , vado a capo solamente se quest'ultima non è l'ultima del blocco (es. non è seguita da } o ) e non sono dentro una stringa, in questo modo evito di mettere newline dopo l'ultima proprietà di un oggetto o dopo l'ultimo parametro di una funzione
+                else if(char === ',' && i < line.length - 1 && !inSingleQuote && !inDoubleQuote)
                 {
                     result += ',\n'+indentUnit.repeat(indentLevel);
                 }
                 else
-                {
                     result += char;
-                }
             }
         }
         else
@@ -303,16 +264,8 @@ function formatJs(lines)
             result = line;
             indentLevel = 0;
         }
+
         temp.push(result);
-
-        // temp = temp.join("\n")
-
-        // temp = temp.replace(/,,/g, ",");
-
-        // temp = temp.replace(/"\s*(.*)\s*"\);/g, "\"$1\");");
-
-        // temp = temp.split("\n");
-
     }
 
     return temp;
