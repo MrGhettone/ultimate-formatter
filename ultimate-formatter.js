@@ -39,9 +39,9 @@ function formatCode(code,lang)
     // console.log(code)
     // 1) Normalizza newline
     code = code.replace(/\r\n/g, "\n");
-    code = code.replace(/,\s+/g, ",");
+    code = code.replace(/\(\s*(.*)\s*,\s*(.*)\s*\)/g, "($1,$2)");
     // if(!/".*\)\s*{.*"/.test(code) && !/'.*\)\s*{.*'/.test(code))
-        code = code.replace(/\)\s*{/g, ")\n{");
+    code = code.replace(/\)\s*{/g, ")\n{");
     code = code.replace(/{\s*"/g, "{\"");
 
 
@@ -171,7 +171,7 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
             result += '++'; // segnaposto doppio per split successivo
         else if(char === '=' && !inSingleQuote && !inDoubleQuote)
             result += '=='; // segnaposto doppio per split successivo
-        else if(char === ';' && !inSingleQuote && !inDoubleQuote && !/\(.*;.*\)/.test(line))
+        else if(char === ';' && !inSingleQuote && !inDoubleQuote && !/\/.*;.*\//.test(line) && i < line.length - 1)
             result += ';;'; // segnaposto doppio per split successivo
         else
             result += char;
