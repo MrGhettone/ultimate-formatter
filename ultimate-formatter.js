@@ -40,7 +40,10 @@ function formatCode(code,lang)
     // 1) Normalizza newline
     code = code.replace(/\r\n/g, "\n");
     code = code.replace(/,\s+/g, ",");
-    code = code.replace(/\)\s*{/g, ")\n{");
+    // if(!/".*\)\s*{.*"/.test(code) && !/'.*\)\s*{.*'/.test(code))
+        code = code.replace(/\)\s*{/g, ")\n{");
+    code = code.replace(/{\s*"/g, "{\"");
+
 
     // 2) Rimuovi spazi nei parametri delle tonde (semplice, NON entra in stringhe/commenti)
     // code = code.replace(/\s*\(+/g, "(");
@@ -101,12 +104,10 @@ function formatCode(code,lang)
             continue;
         }
 
-        if(trimmed != "{" && trimmed.startsWith("{"))
+        if(trimmed != "{" && trimmed.startsWith("{") && (!/\{.*"/.test(trimmed || !/\{.*'/.test(trimmed))))
         {
-            // indentLevel++;
             indentLevel++;
             trimmed = trimmed.replace(/{(.*)/g, "{\n"+indentUnit.repeat(indentLevel)+"$1");
-            // indentLevel++;
         }
 
         if(trimmed != "}" && trimmed.endsWith("}"))
@@ -170,7 +171,7 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
             result += '++'; // segnaposto doppio per split successivo
         else if(char === '=' && !inSingleQuote && !inDoubleQuote)
             result += '=='; // segnaposto doppio per split successivo
-        else if(char === ';' && !inSingleQuote && !inDoubleQuote)
+        else if(char === ';' && !inSingleQuote && !inDoubleQuote && !/\(.*;.*\)/.test(line))
             result += ';;'; // segnaposto doppio per split successivo
         else
             result += char;
@@ -186,12 +187,12 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
     result = result.replace(/ \+\+/g, '+');
     // result = result.replace(/ \.\./g, '.');
     result = result.replace(/\+\+/g, '+');
-    if(/(.*)\.\.(.*)/g.test(result))
-    {
-        console.log(result);
-        result = result.replace(/(.*)\.\.(.*)/g, '$1.$2');
-        console.log(result);
-    }
+    // if(/(.*)\.\.(.*)/g.test(result))
+    // {
+    //     console.log(result);
+    //     result = result.replace(/(.*)\.\.(.*)/g, '$1.$2');
+    //     console.log(result);
+    // }
     result = result.replace(/==/g, '=');
     result = result.replace(/;;\s*/g, ';\n'+indentUnit.repeat(indentLevel));
     return result;
@@ -208,7 +209,7 @@ function formatJs(lines)
     const indentUnit = "    "; // 4 spazi
     var temp = [];
 
-    lines = lines.join("\n")
+    // lines = lines.join("\n")
 
     // lines = lines.replace(/}\s*\)\s*\.(.*)/g, "}).$1")
 
@@ -217,15 +218,19 @@ function formatJs(lines)
     // lines = lines.replace(/:\s*{/g, ":{");
 
     // lines = lines.replace(/}\s*\)/g, "})");
-
-    lines = lines.replace(/\)\s*\.(.*)\((.*?)\)\s*{/g, ").$1($2) {");
-    lines = lines.replace(/function\((.*?)\)\s*{/g, "function($1) {");
+    // if(!/\)\.\$1\(\$2\) \{\"/.test(lines))
+    lines = lines.join("\n").replace(/\)\s*\.(.*)\((.*?)\)\s*{/g, ").$1($2) {").split("\n");
+    lines = lines.join("\n").replace(/function\((.*?)\)\s*{/g, "function($1) {").split("\n");
+    // if(!/function($1) {"/.test(lines))
+        // lines = lines.replace(/function\((.*?)\)\s*{/g, "function($1) {");
+    // lines = lines.replace(/{\s*"/g, "{\"");
 
     // lines = lines.replace(/\/\s*(.*)\s*(.*)\s*(.*)\//g, "/$1$2$3{/");
 
     // lines = lines.replace(/"\s*(.*)\s*"\);/g, "\"$1\");");
+    // lines = lines.replace(/{\s*"/g, "{\"");
 
-    lines = lines.split("\n");
+    // lines = lines.split("\n");
 
     for (let j = 0; j < lines.length; j++)
     {
@@ -238,7 +243,7 @@ function formatJs(lines)
             result = line;
             indentLevel = Math.floor(line.indexOf("$.ajax({") / indentUnit.length) + 1;
         }
-        else if(inAjax && (/\}\)\..*\(function\(.*\) \{/.test(line.trim())))
+        else if(inAjax && (/function\(.*\)\s*\{/.test(line.trim())))
         {
             inAjax = false;
             indentLevel = Math.max(0, indentLevel - 1);
@@ -250,7 +255,6 @@ function formatJs(lines)
         {
             // if(lines[j - 1].trim().endsWith("{"))
             //     result+= indentUnit.repeat(indentLevel - 1);
-            // console.log('line: '+line.length)
             for (let i = 0; i < line.length; i++)
             {
                 // var inComment = line.trim().startsWith("//");
