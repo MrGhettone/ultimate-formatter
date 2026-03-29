@@ -82,7 +82,7 @@ function formatCode(code,lang)
         // caso apertura graffa singola: emetti alla indent corrente, poi incrementa
         if (trimmed == "{" || trimmed.endsWith("{"))
         {
-            if(/\}\}/.test(trimmed))
+            if(/\{\{/.test(trimmed))
             {
                 var splitted = trimmed.split("{");
                 for(let j = 0; j < splitted.length; j++)
@@ -120,13 +120,13 @@ function formatCode(code,lang)
             continue;
         }
 
-        if(trimmed != "{" && trimmed.startsWith("{") && (!/\{.*"/.test(trimmed || !/\{.*'/.test(trimmed))))
+        if(trimmed != "{" && trimmed.startsWith("{") && (!/\{.*"/.test(trimmed) || !/\{.*'/.test(trimmed)))
         {
             indentLevel++;
             trimmed = trimmed.replace(/{(.*)/g, "{\n"+indentUnit.repeat(indentLevel)+"$1");
         }
 
-        if(trimmed != "}" && trimmed.endsWith("}") && (!/\}.*"/.test(trimmed || !/\}.*'/.test(trimmed))))
+        if(trimmed != "}" && trimmed.endsWith("}") && (!/\}.*"/.test(trimmed) || !/\}.*'/.test(trimmed)))
         {
             indentLevel = Math.max(0, indentLevel - 1);
             trimmed = trimmed.replace(/(.*)}/g, "$1\n"+indentUnit.repeat(indentLevel)+"}");
@@ -135,9 +135,11 @@ function formatCode(code,lang)
         trimmed = splitSemicolonsOutsideStrings(trimmed,indentLevel);
 
         // riga normale: emetti alla indent corrente
-        if(lines[i - 1].endsWith(")") && trimmed != '{' && !trimmed.startsWith("{") && !trimmed.endsWith("{"))
-            output.push(indentUnit.repeat(indentLevel + 1) + trimmed);
-        else
+        // if(trimmed != '{' && !trimmed.startsWith("{") && !trimmed.endsWith("{"))
+        //     if(i > 0 && lines[i - 1] != undefined)
+        //         if(lines[i - 1].endsWith(")"))
+        //             output.push(indentUnit.repeat(indentLevel + 1) + trimmed);
+        // else
             output.push(indentUnit.repeat(indentLevel) + trimmed);
     }
 
@@ -154,6 +156,9 @@ function formatCode(code,lang)
             break;
         }
     }
+
+    output = output.join("\n").replace(/{\s*"/g, "{\"").split("\n");
+
 
     return output.join("\n");
 }
@@ -178,8 +183,8 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
             result += '++'; // segnaposto doppio per split successivo
         else if(char === '=' && !inSingleQuote && !inDoubleQuote)
             result += '=='; // segnaposto doppio per split successivo
-        else if(char === ';' && !inSingleQuote && !inDoubleQuote && !/\/.*;.*\//.test(line) && i < line.length - 1)
-            result += ';;'; // segnaposto doppio per split successivo
+        // else if(char === ';' && !inSingleQuote && !inDoubleQuote && !/\/.*;.*\//.test(line) && i < line.length - 1)
+        //     result += ';;'; // segnaposto doppio per split successivo
         else
             result += char;
     }
@@ -191,7 +196,7 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
     result = result.replace(/ \+\+/g, '+');
     result = result.replace(/\+\+/g, '+');
     result = result.replace(/==/g, '=');
-    result = result.replace(/;;\s*/g, ';\n'+indentUnit.repeat(indentLevel));
+    // result = result.replace(/;;\s*/g, ';\n'+indentUnit.repeat(indentLevel));
 
     return result;
 }
