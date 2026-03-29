@@ -37,10 +37,25 @@ function formatCode(code,lang)
 {
     const indentUnit = "    "; // 4 spazi
     code = code.replace(/\r\n/g, "\n");
-    code = code.replace(/\(\s*(.*)\s*,\s*(.*)\s*\)/g, "($1,$2)");
-    code = code.replace(/\)\s*{/g, ")\n{");
-    code = code.replace(/{\s*"/g, "{\"");
 
+    // 1. Salva i commenti
+    const comments = [];
+    code = code.replace(/(\/\/.*)/g, (match) => {
+        const index = comments.length;
+        comments.push(match);
+        return `__COMMENT_${index}__`;
+    });
+
+    // 2. Applica le tue regex
+    code = code.replace(/\(\s*(.*)\s*,\s*(.*)\s*\)/g, "($1,$2)");
+    // code = code.replace(/\(\s*([^,\n]+?)\s*,\s*([^\n]+?)\s*\)/g, "($1,$2)");
+    code = code.replace(/\)\s*{/g, ")\n{");
+    // code = code.replace(/\)[ \t]*{/g, ")\n{");
+    code = code.replace(/{\s*"/g, "{\"");
+    // code = code.replace(/{[ \t]*"/g, "{\"");
+
+    // 3. Ripristina i commenti
+    code = code.replace(/__COMMENT_(\d+)__/g, (_, i) => comments[i]);
 
     // 2) Rimuovi spazi nei parametri delle tonde (semplice, NON entra in stringhe/commenti)
     code = code.replace(/\s*\(+/g, "(");
@@ -56,6 +71,10 @@ function formatCode(code,lang)
     {
         const line = lines[i];
         var trimmed = line.trim();
+
+        if(!/\/\/\s/.test(trimmed))
+            trimmed = trimmed.replace(/\/\//g, "// ");
+
         // identifico i commenti e li emetto senza modificarli, in questo modo evito di inserire spazi o newline indesiderati all'interno di commenti che possono essere presenti in linee con codice
         // if(/\/\//.test(trimmed))
         if(trimmed.startsWith("//"))
@@ -64,20 +83,17 @@ function formatCode(code,lang)
             continue;
         }
 
-        if(!/\/\/\s/.test(trimmed))
-            trimmed = trimmed.replace(/\/\//g, "// ");
-
         // conserva linee vuote
-        if(trimmed === "")
-        {
-            ivuoti++;
-            continue;
-        }
-        else if(ivuoti > 0)
-        {
-            output.push("");
-            ivuoti = 0;
-        }
+        // if(trimmed === "")
+        // {
+        //     ivuoti++;
+        //     continue;
+        // }
+        // else if(ivuoti > 0)
+        // {
+        //     output.push("");
+        //     ivuoti = 0;
+        // }
 
         // caso apertura graffa singola: emetti alla indent corrente, poi incrementa
         if (trimmed == "{" || trimmed.endsWith("{"))
@@ -120,13 +136,13 @@ function formatCode(code,lang)
             continue;
         }
 
-        if(trimmed != "{" && trimmed.startsWith("{") && (!/\{.*"/.test(trimmed) || !/\{.*'/.test(trimmed)))
+        if(trimmed != "{" && trimmed.startsWith("{") && !/\{.*\s*"/.test(trimmed) && !/\{.*\s*'/.test(trimmed))
         {
             indentLevel++;
             trimmed = trimmed.replace(/{(.*)/g, "{\n"+indentUnit.repeat(indentLevel)+"$1");
         }
 
-        if(trimmed != "}" && trimmed.endsWith("}") && (!/\}.*"/.test(trimmed) || !/\}.*'/.test(trimmed)))
+        if(trimmed != "}" && trimmed.endsWith("}") && !/\}.*\s*"/.test(trimmed) && !/\}.*\s*'/.test(trimmed))
         {
             indentLevel = Math.max(0, indentLevel - 1);
             trimmed = trimmed.replace(/(.*)}/g, "$1\n"+indentUnit.repeat(indentLevel)+"}");
@@ -134,13 +150,27 @@ function formatCode(code,lang)
 
         trimmed = splitSemicolonsOutsideStrings(trimmed,indentLevel);
 
+        // if(/;\s*(.*\()/.test(trimmed))
+        // {
+        //     trimmed = trimmed.replace(/;\s*(.*\()/g, ";\n"+indentUnit.repeat(indentLevel)+"$1");
+        // }
         // riga normale: emetti alla indent corrente
-        // if(trimmed != '{' && !trimmed.startsWith("{") && !trimmed.endsWith("{"))
-        //     if(i > 0 && lines[i - 1] != undefined)
-        //         if(lines[i - 1].endsWith(")"))
-        //             output.push(indentUnit.repeat(indentLevel + 1) + trimmed);
-        // else
+        const prev = lines[i - 1]?.trim();
+
+        const isControl =
+            /^(if|for|while|else if)\b.*\)$/.test(prev) ||
+            /^else$/.test(prev);
+
+        if (
+            trimmed !== '{' &&
+            !trimmed.startsWith("{") &&
+            !trimmed.endsWith("{") &&
+            isControl
+        ) {
+            output.push(indentUnit.repeat(indentLevel + 1) + trimmed);
+        } else {
             output.push(indentUnit.repeat(indentLevel) + trimmed);
+        }
     }
 
     switch(lang)
@@ -158,6 +188,7 @@ function formatCode(code,lang)
     }
 
     output = output.join("\n").replace(/{\s*"/g, "{\"").split("\n");
+    // output = output.join("\n").replace(/;(.*)\("/g, ";\n").split("\n");
 
 
     return output.join("\n");
@@ -174,17 +205,21 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
     for (let i = 0; i < line.length; i++)
     {
         const char = line[i];
+
         if(char === "'" && !inDoubleQuote)
             inSingleQuote = !inSingleQuote;
         else if(char === '"' && !inSingleQuote)
             inDoubleQuote = !inDoubleQuote;
 
+        if(char == ';' && inSingleQuote)
+            console.log(line, inSingleQuote);
+
         if(char === '+' && !inSingleQuote && !inDoubleQuote)
             result += '++'; // segnaposto doppio per split successivo
         else if(char === '=' && !inSingleQuote && !inDoubleQuote)
             result += '=='; // segnaposto doppio per split successivo
-        // else if(char === ';' && !inSingleQuote && !inDoubleQuote && !/\/.*;.*\//.test(line) && i < line.length - 1)
-        //     result += ';;'; // segnaposto doppio per split successivo
+        else if(char === ';' && !inSingleQuote && !inDoubleQuote && !/\/.*;.*\//.test(line) && !/.*;\s*\/\//.test(line) && !/\(.*;.*\)/.test(line) && i < line.length - 1)
+            result += ';;'; // segnaposto doppio per split successivo
         else
             result += char;
     }
@@ -196,7 +231,8 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
     result = result.replace(/ \+\+/g, '+');
     result = result.replace(/\+\+/g, '+');
     result = result.replace(/==/g, '=');
-    // result = result.replace(/;;\s*/g, ';\n'+indentUnit.repeat(indentLevel));
+    if(!/'.*;;.*'/.test(result) && !/".*;;.*"/.test(result))
+        result = result.replace(/;;/g, ';\n'+indentUnit.repeat(indentLevel));
 
     return result;
 }
@@ -209,11 +245,27 @@ function formatJs(lines)
         inDoubleQuote = false,
         temp = [];
     const indentUnit = "    "; // 4 spazi
+    const comments = [];
+
+    lines = lines.join("\n");
+
+    // 1. Salva i commenti
+    lines = lines.replace(/(\/\/.*)/g, (match) => {
+        const index = comments.length;
+        comments.push(match);
+        return `__COMMENT_${index}__`;
+    });
 
     // indenta le ajax correttamente con lo then o done dopo la tonda e allinea il function alla indentazione corretta
-    lines = lines.join("\n").replace(/\)\s*\.(.*)\((.*?)\)\s*{/g, ").$1($2) {").split("\n");
-    lines = lines.join("\n").replace(/function\((.*?)\)\s*{/g, "function($1) {").split("\n");
+    lines = lines.replace(/\)\s*\.(.*)\((.*?)\)\s*{/g, ").$1($2) {");
+    // lines = lines.replace(/\)[ \t]*\.([^\(\n]+)\(([^\n]*?)\)[ \t]*{/g, ").$1($2) {");
+    lines = lines.replace(/function\((.*?)\)\s*{/g, "function($1) {");
+    // lines = lines.replace(/function\(([^\n]*?)\)[ \t]*{/g, "function($1) {");
 
+    // // 3. Ripristina i commenti
+    lines = lines.replace(/__COMMENT_(\d+)__/g, (_, i) => comments[i]);
+
+    lines = lines.split("\n");
     // coclo per identificare l'intestazione di una chiamata ajax e indentare tutto il blocco fino alla chiusura del function associato, tenendo conto di eventuali stringhe che possono contenere graffe o parentesi
     for (let j = 0; j < lines.length; j++)
     {
