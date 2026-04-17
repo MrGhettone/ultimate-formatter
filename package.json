@@ -4,7 +4,7 @@
     "license": "MIT",
     "publisher": "MrGhettone",
     "description": "Custom Formatter for JS and PHP",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "icon": "icon.png",
     "engines": {
         "vscode": "^1.70.0"
@@ -25,6 +25,16 @@
             "[javascript]": { "editor.defaultFormatter": "ultimate-formatter" },
             "[php]": { "editor.defaultFormatter": "ultimate-formatter" }
         },
+        "snippets": [
+            {
+                "language": "javascript",
+                "path": "./snippets/javascript.json"
+            },
+            {
+                "language": "php",
+                "path": "./snippets/php.json"
+            }
+        ],
         "commands": []
     },
     "repository": {
