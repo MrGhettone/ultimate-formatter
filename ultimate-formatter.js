@@ -52,6 +52,7 @@ function formatCode(code,lang)
     code = code.replace(/\)\s*{/g, ")\n{");
     // code = code.replace(/\)[ \t]*{/g, ")\n{");
     code = code.replace(/{\s*"/g, "{\"");
+    code = code.replace(/}\s*else\s*{/g, "}\nelse\n{");
     // code = code.replace(/{[ \t]*"/g, "{\"");
 
     // 3. Ripristina i commenti
@@ -231,7 +232,7 @@ function splitSemicolonsOutsideStrings(line,indentLevel)
     result = result.replace(/ \+\+/g, '+');
     result = result.replace(/\+\+/g, '+');
     result = result.replace(/==/g, '=');
-    if(!/'.*;;.*'/.test(result) && !/".*;;.*"/.test(result))
+    if(!/'.*;;.*'/.test(result) && !/".*;;.*"/.test(result) && !/\/.*;;.*\//.test(result))
         result = result.replace(/;;/g, ';\n'+indentUnit.repeat(indentLevel));
 
     return result;

@@ -4,7 +4,7 @@
     "license": "MIT",
     "publisher": "MrGhettone",
     "description": "Custom Formatter for JS and PHP",
-    "version": "0.1.2",
+    "version": "0.1.4",
     "icon": "icon.png",
     "engines": {
         "vscode": "^1.70.0"
