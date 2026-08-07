@@ -52,23 +52,48 @@ function formatCode(code, lang)
         return `__COMMENT_${index}__`;
     });
 
+    // 1b. Salva le stringhe letterali per non alterarle con le regex di normalizzazione
+    // FIX CRITICO: il formatter modificava il contenuto delle stringhe (es. query SQL)
+    // rimuovendo spazi o virgole al loro interno — le stringhe vanno protette come i commenti.
+    const strings = [];
+    code = code.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, (match) => {
+        const index = strings.length;
+        strings.push(match);
+        return `__STRING_${index}__`;
+    });
+
     // 2. Normalizzazione: usa regex non-greedy per evitare match errati su righe con più funzioni
-    code = code.replace(/\(\s*([^,\n]+?)\s*,\s*([^\n]+?)\s*\)/g, "($1,$2)");
+    // FIX: normalizza TUTTE le virgole di un gruppo di parentesi, non solo la prima
+    code = code.replace(/\(([^()\n]*)\)/g, (match, inner) => {
+        if (!inner.includes(",")) return match;
+        const normalized = inner.split(",").map(p => p.trim()).join(", ");
+        return "(" + normalized + ")";
+    });
     code = code.replace(/\)\s*{/g, ")\n{");
     code = code.replace(/{\s*"/g, "{\"");
     // Separa } else if su righe distinte (Allman style)
     code = code.replace(/}\s*else\s+if\b/g, "}\nelse if");
     code = code.replace(/}\s*else\s*{/g, "}\nelse\n{");
+    // Separa la graffa di chiusura di un blocco quando si trova sulla stessa riga
+    // dell'ultima istruzione (es. ".fail(function(x) { foo(); });")
+    // FIX: usare [ \t]* invece di \s* — \s* attraversava anche i newline e
+    // spezzava blocchi già correttamente su più righe, introducendo righe vuote
+    // spurie e rompendo l'idempotenza del formatter.
+    code = code.replace(/;[ \t]*}/g, ";\n}");
 
-    // 3. Ripristina i commenti
+    // Rimuovi spazi prima di ( — FIX: era \(+ che consumava anche parentesi annidate
+    // FIX: non rimuovere lo spazio dopo && / || quando seguiti da una parentesi
+    code = code.replace(/(?<!&&)(?<!\|\|)\s*\(/g, "(");
+
+    // 3. Ripristina stringhe e commenti
+    code = code.replace(/__STRING_(\d+)__/g, (_, i) => strings[i]);
     code = code.replace(/__COMMENT_(\d+)__/g, (_, i) => comments[i]);
-
-    // 4. Rimuovi spazi prima di ( — FIX: era \(+ che consumava anche parentesi annidate
-    code = code.replace(/\s*\(/g, "(");
 
     // 5. Split in righe e sostituisci tab con 4 spazi
     const rawLines = code.split("\n");
-    const lines = rawLines.map(l => l.replace(/\t/g, indentUnit));
+    const lines = rawLines
+        .map(l => l.replace(/\t/g, indentUnit))
+        .flatMap(splitInlineControlBody);
 
     let output = [];
 
@@ -174,17 +199,20 @@ function formatCode(code, lang)
         }
 
         // Riga con { iniziale (non isolato): split e incrementa livello
+        // FIX: il resto catturato dopo "{" va trimmato, altrimenti lo spazio
+        // originale tra "{" e il contenuto si sommava all'indentazione.
         if (trimmed.startsWith("{") && !/\{.*["']/.test(trimmed))
         {
             indentLevel++;
-            trimmed = trimmed.replace(/{(.*)/, "{\n" + indentUnit.repeat(indentLevel) + "$1");
+            trimmed = trimmed.replace(/{(.*)/, (_, rest) => "{\n" + indentUnit.repeat(indentLevel) + rest.trim());
         }
 
         // Riga con } finale (non isolato): decrementa e split
+        // FIX: trimma la parte prima di "}" per non lasciare spazi finali
         if (trimmed.endsWith("}") && !/["'].*\}/.test(trimmed))
         {
             indentLevel = Math.max(0, indentLevel - 1);
-            trimmed = trimmed.replace(/(.*)}/, "$1\n" + indentUnit.repeat(indentLevel) + "}");
+            trimmed = trimmed.replace(/(.*)}/, (_, before) => before.trim() + "\n" + indentUnit.repeat(indentLevel) + "}");
         }
 
         trimmed = splitSemicolonsOutsideStrings(trimmed, indentLevel);
@@ -232,6 +260,115 @@ function formatCode(code, lang)
 }
 
 // ---------------------------------------------------------
+//  Trova la parentesi/graffa di chiusura corrispondente a quella aperta in
+//  openIndex, ignorando il contenuto di stringhe singole/doppie.
+// ---------------------------------------------------------
+function findMatchingBracket(str, openIndex, openChar, closeChar)
+{
+    let depth = 0;
+    let inSingle = false, inDouble = false;
+
+    for (let i = openIndex; i < str.length; i++)
+    {
+        const c = str[i];
+        const prev = i > 0 ? str[i - 1] : '';
+
+        if (c === "'" && !inDouble && prev !== '\\')
+            inSingle = !inSingle;
+        else if (c === '"' && !inSingle && prev !== '\\')
+            inDouble = !inDouble;
+        else if (!inSingle && !inDouble)
+        {
+            if (c === openChar) depth++;
+            else if (c === closeChar)
+            {
+                depth--;
+                if (depth === 0) return i;
+            }
+        }
+    }
+
+    return -1;
+}
+
+// ---------------------------------------------------------
+//  Divide una stringa in parti separate da virgole "di primo livello"
+//  (fuori da stringhe e da parentesi/graffe annidate)
+// ---------------------------------------------------------
+function splitTopLevelCommas(str)
+{
+    const parts = [];
+    let depth = 0;
+    let inSingle = false, inDouble = false;
+    let current = '';
+
+    for (let i = 0; i < str.length; i++)
+    {
+        const c = str[i];
+        const prev = i > 0 ? str[i - 1] : '';
+
+        if (c === "'" && !inDouble && prev !== '\\')
+            inSingle = !inSingle;
+        else if (c === '"' && !inSingle && prev !== '\\')
+            inDouble = !inDouble;
+
+        if (!inSingle && !inDouble && (c === '(' || c === '[' || c === '{'))
+            depth++;
+        else if (!inSingle && !inDouble && (c === ')' || c === ']' || c === '}'))
+            depth--;
+
+        if (c === ',' && depth === 0 && !inSingle && !inDouble)
+        {
+            parts.push(current);
+            current = '';
+        }
+        else
+        {
+            current += c;
+        }
+    }
+
+    if (current.trim() !== '')
+        parts.push(current);
+
+    return parts;
+}
+
+// ---------------------------------------------------------
+//  FIX #11: se il corpo di un if/else if/else senza graffe si trova sulla
+//  stessa riga della condizione, spezzalo su due righe così che la logica
+//  di indentazione del corpo-senza-graffe (isControl) possa applicarsi.
+// ---------------------------------------------------------
+function splitInlineControlBody(line)
+{
+    const leadingWhitespace = (line.match(/^\s*/) || [""])[0];
+    const trimmed = line.trim();
+
+    const controlMatch = trimmed.match(/^(if|else if)\s*\(/);
+    if (controlMatch)
+    {
+        const openIndex = trimmed.indexOf("(");
+        const closeIndex = findMatchingBracket(trimmed, openIndex, "(", ")");
+        if (closeIndex !== -1)
+        {
+            const rest = trimmed.slice(closeIndex + 1).trim();
+            if (rest && !rest.startsWith("{"))
+            {
+                const head = trimmed.slice(0, closeIndex + 1);
+                return [leadingWhitespace + head, leadingWhitespace + rest];
+            }
+        }
+        return [line];
+    }
+
+    const elseMatch = trimmed.match(/^else\s+(.+)$/);
+    if (elseMatch && !elseMatch[1].startsWith("{"))
+        return [leadingWhitespace + "else", leadingWhitespace + elseMatch[1]];
+
+    return [line];
+}
+
+// ---------------------------------------------------------
 //  Separa i ; fuori da stringhe — versione riscritta
 //  FIX CRITICO: rimosso l'encoding fragile di + e = che corrompeva
 //  operatori come i++, +=, ==, ===, e template literals
@@ -274,16 +411,94 @@ function splitSemicolonsOutsideStrings(line, indentLevel)
 }
 
 // ---------------------------------------------------------
+//  Riformatta il contenuto di un blocco $.ajax({...}) (comprese le
+//  eventuali graffe annidate, es. il parametro "data: {...}"): ogni { va a
+//  capo, ogni } torna a capo e si disindenta, ogni virgola va a capo.
+//  FIX #8: prima le graffe annidate (es. data:{...}) restavano sulla stessa
+//  riga delle proprietà invece di andare su righe proprie.
+// ---------------------------------------------------------
+function reformatAjaxBlock(text, baseLevel, indentUnit)
+{
+    let normalized = '';
+    let inSingleQuote = false, inDoubleQuote = false, inBacktick = false;
+
+    for (let i = 0; i < text.length; i++)
+    {
+        const c = text[i];
+        const prev = i > 0 ? text[i - 1] : '';
+
+        if      (c === "'" && !inDoubleQuote && !inBacktick && prev !== '\\')
+            inSingleQuote = !inSingleQuote;
+        else if (c === '"' && !inSingleQuote && !inBacktick && prev !== '\\')
+            inDoubleQuote = !inDoubleQuote;
+        else if (c === '`' && !inSingleQuote && !inDoubleQuote)
+            inBacktick = !inBacktick;
+
+        const inString = inSingleQuote || inDoubleQuote || inBacktick;
+
+        if (!inString && c === '{')
+            normalized += '{\n';
+        else if (!inString && c === '}')
+            normalized += '\n}';
+        else if (!inString && c === ',')
+            normalized += ',\n';
+        else
+            normalized += c;
+    }
+
+    const fragments = normalized.split('\n').map(f => f.trim()).filter(f => f !== '');
+
+    const out = [];
+    let level = baseLevel;
+
+    for (const fragment of fragments)
+    {
+        if (fragment.startsWith('}'))
+            level = Math.max(baseLevel - 1, level - 1);
+
+        out.push(indentUnit.repeat(level) + fragment);
+
+        if (fragment.endsWith('{'))
+            level++;
+    }
+
+    return out;
+}
+
+// ---------------------------------------------------------
+//  FIX #5: spezza le dichiarazioni var/let/const con più variabili
+//  dichiarate sulla stessa riga, una per riga, con le righe successive
+//  indentate di un livello in più rispetto alla parola chiave.
+// ---------------------------------------------------------
+function splitVarDeclaration(trimmed, level, indentUnit)
+{
+    const match = trimmed.match(/^(var|let|const)\s+([\s\S]*);$/);
+    if (!match) return null;
+
+    const keyword = match[1];
+    const declList = match[2];
+
+    const parts = splitTopLevelCommas(declList).map(p => p.trim()).filter(p => p !== '');
+    if (parts.length <= 1) return null;
+
+    const baseIndent = indentUnit.repeat(level);
+    const innerIndent = indentUnit.repeat(level + 1);
+
+    const result = [baseIndent + keyword + " " + parts[0] + ","];
+    for (let i = 1; i < parts.length; i++)
+    {
+        const suffix = i === parts.length - 1 ? ";" : ",";
+        result.push(innerIndent + parts[i] + suffix);
+    }
+
+    return result;
+}
+
+// ---------------------------------------------------------
 //  Formattazione specifica JavaScript
 // ---------------------------------------------------------
 function formatJs(lines)
 {
-    let inSingleQuote = false;
-    let inDoubleQuote = false;
-    let inBacktick    = false; // FIX: aggiunto tracking backtick
-    let inAjax = false;
-    let ajaxBaseLevel = 0; // livello di indentazione di $.ajax({ — usato per allineare .done/.fail
-    let temp = [];
     const indentUnit = "    ";
     const comments = [];
 
@@ -305,73 +520,169 @@ function formatJs(lines)
 
     lines = lines.split("\n");
 
-    for (let j = 0; j < lines.length; j++)
+    const temp = [];
+    let i = 0;
+
+    while (i < lines.length)
     {
-        const line = lines[j];
-        let result = '';
+        const line = lines[i];
 
-        if (line.trim() === "$.ajax({" && !inAjax)
+        if (line.trim() === "$.ajax({")
         {
-            inAjax = true;
-            result = line;
-            ajaxBaseLevel = Math.floor(line.indexOf("$.ajax({") / indentUnit.length);
-            indentLevel   = ajaxBaseLevel + 1;
-        }
-        else if (inAjax && /function\(.*\)\s*\{/.test(line.trim()))
-        {
-            // FIX: usare ajaxBaseLevel invece di 3 decrementi fissi.
-            // I decrementi fissi portavano .done a livello 0 indipendentemente
-            // da dove si trovava $.ajax({, mentre .fail usava l'output di
-            // formatCode (corretto) — causando il disallineamento visibile.
-            inAjax = false;
-            result = indentUnit.repeat(ajaxBaseLevel) + line.trim();
-        }
-        else if (inAjax)
-        {
-            for (let i = 0; i < line.length; i++)
+            // Trova la riga in cui si chiude il blocco $.ajax({...}) tracciando
+            // la profondità delle graffe (fuori da stringhe) attraverso le righe.
+            const baseLevel = Math.floor((line.match(/^\s*/) || [""])[0].length / indentUnit.length);
+
+            let braceDepth = 1;
+            let inSingleQuote = false, inDoubleQuote = false, inBacktick = false;
+            const blockLines = [];
+            let closeFound = false;
+            let chainedRemainder = '';
+            let j = i + 1;
+
+            // FIX: la profondità delle graffe va controllata carattere per carattere,
+            // non solo a fine riga — righe come "}).done(function(response) {"
+            // (chaining sulla stessa riga, comunissimo con $.ajax) chiudono il
+            // blocco ajax e ne aprono subito un altro sulla stessa riga: se si
+            // controlla solo a fine riga la profondità risulta ancora 1 e il
+            // blocco ajax "inghiotte" per errore tutto il codice successivo.
+            outer:
+            for (; j < lines.length; j++)
             {
-                const char = line[i];
-                const prev = i > 0 ? line[i - 1] : '';
+                const l = lines[j];
 
-                // FIX: aggiunto backtick e controllo escape nel tracking stringhe ajax
-                if      (char === "'" && !inDoubleQuote && !inBacktick && prev !== '\\')
-                    inSingleQuote = !inSingleQuote;
-                else if (char === '"' && !inSingleQuote && !inBacktick && prev !== '\\')
-                    inDoubleQuote = !inDoubleQuote;
-                else if (char === '`' && !inSingleQuote && !inDoubleQuote)
-                    inBacktick = !inBacktick;
+                for (let k = 0; k < l.length; k++)
+                {
+                    const c = l[k];
+                    const prev = k > 0 ? l[k - 1] : '';
 
-                if (char === '{' && !inSingleQuote && !inDoubleQuote && !inBacktick)
-                {
-                    result += '{';
-                    indentLevel++;
+                    if      (c === "'" && !inDoubleQuote && !inBacktick && prev !== '\\')
+                        inSingleQuote = !inSingleQuote;
+                    else if (c === '"' && !inSingleQuote && !inBacktick && prev !== '\\')
+                        inDoubleQuote = !inDoubleQuote;
+                    else if (c === '`' && !inSingleQuote && !inDoubleQuote)
+                        inBacktick = !inBacktick;
+                    else if (!inSingleQuote && !inDoubleQuote && !inBacktick)
+                    {
+                        if (c === '{') braceDepth++;
+                        else if (c === '}')
+                        {
+                            braceDepth--;
+                            if (braceDepth === 0)
+                            {
+                                // La "}" chiude l'oggetto opzioni; subito dopo (a parte
+                                // eventuali spazi) c'è la ")" che chiude la chiamata
+                                // $.ajax(...) stessa — va inclusa nel blocco, non
+                                // scorporata come se fosse codice successivo.
+                                let end = k;
+                                let m = k + 1;
+                                while (m < l.length && /\s/.test(l[m])) m++;
+                                if (l[m] === ')')
+                                    end = m;
+
+                                blockLines.push(l.slice(0, end + 1));
+                                // FIX: un chaining sulla stessa riga (es. "}).done(...) {"
+                                // o "}).then(...) {") va tenuto attaccato alla "})" di
+                                // chiusura, esattamente come già avviene per ".fail(...)",
+                                // invece di essere spostato su una riga a parte.
+                                chainedRemainder = l.slice(end + 1).trim();
+                                closeFound = true;
+                                break outer;
+                            }
+                        }
+                    }
                 }
-                else if (char === '}' && !inSingleQuote && !inDoubleQuote && !inBacktick)
-                {
-                    indentLevel = Math.max(0, indentLevel - 1);
-                    result += '}';
-                }
-                else if (char === ',' && i < line.length - 1 && !inSingleQuote && !inDoubleQuote && !inBacktick)
-                {
-                    result += ',\n' + indentUnit.repeat(indentLevel);
-                }
-                else
-                    result += char;
+
+                blockLines.push(l);
             }
-        }
-        else
-        {
-            result = line;
-            indentLevel = 0;
+
+            if (!closeFound)
+            {
+                temp.push(line);
+                i++;
+                continue;
+            }
+
+            const innerText = blockLines.join(" ");
+            const formattedInner = reformatAjaxBlock(innerText, baseLevel + 1, indentUnit);
+
+            if (chainedRemainder !== '')
+                formattedInner[formattedInner.length - 1] += chainedRemainder;
+
+            temp.push(indentUnit.repeat(baseLevel) + "$.ajax({");
+            temp.push(...formattedInner);
+
+            i = j + 1;
+            continue;
         }
 
-        temp.push(result);
+        const leadingSpaces = (line.match(/^ */) || [""])[0].length;
+        const level = Math.floor(leadingSpaces / indentUnit.length);
+        const varLines = splitVarDeclaration(line.trim(), level, indentUnit);
+
+        temp.push(...(varLines || [line]));
+        i++;
     }
 
     return temp;
 }
 
+// ---------------------------------------------------------
+//  FIX #12: formatta gli array associativi PHP (array(...) e [...])
+//  con una coppia chiave => valore per riga.
+// ---------------------------------------------------------
+function splitPhpArrayLiteral(trimmed, level, indentUnit)
+{
+    const match = trimmed.match(/^(.*?=\s*)(array\(|\[)([\s\S]*)$/);
+    if (!match) return null;
+
+    const prefix = match[1];
+    const opener = match[2];
+    const openChar = opener === "array(" ? "(" : "[";
+    const closeChar = openChar === "(" ? ")" : "]";
+    const openIndex = prefix.length + opener.length - 1;
+
+    const closeIndex = findMatchingBracket(trimmed, openIndex, openChar, closeChar);
+    if (closeIndex === -1) return null;
+
+    const inner = trimmed.slice(openIndex + 1, closeIndex);
+    const suffix = trimmed.slice(closeIndex + 1);
+
+    // Formatta solo gli array associativi (contengono =>); gli array indicizzati
+    // e le chiamate a funzione restano invariati.
+    if (!inner.trim() || !/=>/.test(inner))
+        return null;
+
+    const parts = splitTopLevelCommas(inner).map(p => p.trim()).filter(p => p !== '');
+    if (parts.length === 0) return null;
+
+    const baseIndent = indentUnit.repeat(level);
+    const innerIndent = indentUnit.repeat(level + 1);
+
+    const result = [baseIndent + prefix + opener];
+    parts.forEach((part, idx) => {
+        const comma = idx < parts.length - 1 ? "," : "";
+        result.push(innerIndent + part + comma);
+    });
+    result.push(baseIndent + closeChar + suffix);
+
+    return result;
+}
+
 function formatPhp(lines)
 {
-    return lines;
+    const indentUnit = "    ";
+    const result = [];
+
+    for (const line of lines)
+    {
+        const leadingSpaces = (line.match(/^ */) || [""])[0].length;
+        const level = Math.floor(leadingSpaces / indentUnit.length);
+        const trimmed = line.trim();
+
+        const arrayLines = splitPhpArrayLiteral(trimmed, level, indentUnit);
+        result.push(...(arrayLines || [line]));
+    }
+
+    return result;
 }
